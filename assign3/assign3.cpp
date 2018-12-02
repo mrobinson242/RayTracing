@@ -15,12 +15,14 @@
 #include <string.h>
 #include <vector>
 #include <iostream>
+#include <unistd.h>
+#include <sstream>
 
 #define MAX_TRIANGLES 2000
 #define MAX_SPHERES 10
 #define MAX_LIGHTS 10
 
-#define DEG_TO_RAD 3.14159265/180
+#define epsilon 0.000001
 
 char *filename=0;
 
@@ -34,7 +36,7 @@ int mode=MODE_DISPLAY;
 #define HEIGHT 480
 
 //the field of view of the camera
-#define fov 60.0
+#define fov 70.0
 
 unsigned char buffer[HEIGHT][WIDTH][3];
 
@@ -49,9 +51,9 @@ struct Vertex
 
 struct Color
 {
-   char red;
-   char green;
-   char blue;
+    char red;
+    char green;
+    char blue;
 };
 
 typedef struct _Triangle
@@ -75,29 +77,120 @@ typedef struct _Light
 } Light;
 
 // Initialize Triangle Data Struct
-Triangle triangles[MAX_TRIANGLES];
+Triangle _triangles[MAX_TRIANGLES];
 
 // Initialize Sphere Data Struct
-Sphere spheres[MAX_SPHERES];
+Sphere _spheres[MAX_SPHERES];
 
 // Initialize Lights Data Struct
-Light lights[MAX_LIGHTS];
+Light _lights[MAX_LIGHTS];
 
-double ambient_light[3];
+double _alpha;
+double _beta;
+double _gamma;
 
-// Initialize Amount Indicators
+// Ambient Light
+double _ambientLight[3];
+
+// Number Indicators
 int _numTriangles = 0;
 int _numSpheres = 0;
 int _numLights = 0;
 
+//hack to make it only draw once
+static int once = 0;
+
 int _sphereIntersections;
+
+// Initialize Camera Origin Point for each Rays
+VectorMath::point _cameraOrigin = {0.0, 0.0, 0.0};
 
 void plotPixelDisplay(int x,int y,unsigned char r,unsigned char g,unsigned char b);
 void plotPixelJpeg(int x,int y,unsigned char r,unsigned char g,unsigned char b);
 void plotPixel(int x,int y,unsigned char r,unsigned char g,unsigned char b);
 
-// Initialize Camera Origin Point for each Rays
-VectorMath::point _cameraOrigin = {0.0, 0.0, 0.0};
+/**
+ * calcArea - Calculates the Area of a Triangle in 3-D
+ */
+double calcArea(VectorMath::point a, VectorMath::point b, VectorMath::point c)
+{
+    // Calculate the Area
+    double area = 0.5 * ((b.x-a.x)*(c.y-a.y) - (c.x-a.x)*(b.y-a.y));
+
+    return area;
+}
+
+/**
+ * pointInTriangle - Checks if intersection point is in triangle
+ */
+bool pointInTriangle(Triangle triangle, VectorMath::point p, VectorMath::point n)
+{
+    bool isInTriangle = true;
+
+    // Get Triangle Vertices
+    Vertex a = triangle.v[0];
+    Vertex b = triangle.v[1];
+    Vertex c = triangle.v[2];
+
+    // Calculate Edges of Triangle
+    VectorMath::point edgeCB = {c.position[0] - b.position[0],
+                                c.position[1] - b.position[1],
+                                c.position[2] - b.position[2]};
+
+    VectorMath::point edgeBA = {b.position[0] - a.position[0],
+                                b.position[1] - a.position[1],
+                                b.position[2] - a.position[2]};
+
+    VectorMath::point edgeAC = {a.position[0] - c.position[0],
+                                a.position[1] - c.position[1],
+                                a.position[2] - c.position[2]};
+
+    // Calculate Vector between Intersection Point and each Vertex
+    VectorMath::point vInterA = {p.x - a.position[0],
+                                 p.y - a.position[1],
+                                 p.z - a.position[2]};
+
+    VectorMath::point vInterB = {p.x - b.position[0],
+                                 p.y - b.position[1],
+                                 p.z - b.position[2]};
+
+    VectorMath::point vInterC = {p.x - c.position[0],
+                                 p.y - c.position[1],
+                                 p.z - c.position[2]};
+
+    // Calculate Cross Product between each Edge and the Intersection/Vertex Vector
+    VectorMath::point crossA = VectorMath::crossProduct(edgeBA, vInterA);
+    VectorMath::point crossB = VectorMath::crossProduct(edgeCB, vInterB);
+    VectorMath::point crossC = VectorMath::crossProduct(edgeAC, vInterC);
+
+    // Check if point is inside Triangle
+    if( (VectorMath::dotProduct(n, crossA) < 0) ||
+        (VectorMath::dotProduct(n, crossB) < 0) ||
+        (VectorMath::dotProduct(n, crossC) < 0))
+    {
+        // No Intersection
+        isInTriangle = false;
+    }
+    else
+    {
+        // Convert Vertices into Vector Points
+        VectorMath::point p1 = {a.position[0], a.position[1], a.position[2]};
+        VectorMath::point p2 = {b.position[0], b.position[1], b.position[2]};
+        VectorMath::point p3 = {c.position[0], c.position[1], c.position[2]};
+
+        // Calculate Area of Triangle
+        double areaAlpha = calcArea(p, p2, p3);
+        double areaBeta = calcArea(p1, p, p3);
+        double area = calcArea(p1, p2, p3);
+
+        // Set Barycentric Coordinates for Triangle
+        _alpha = areaAlpha / area;
+        _beta = areaBeta / area;
+        _gamma = 1.0 - _alpha - _beta;
+    }
+
+    return isInTriangle;
+}
 
 /**
  * intersectSphere
@@ -107,6 +200,7 @@ double intersectSphere(Ray &ray, VectorMath::point center, double radius)
     // Create Intersection Values
     double t0 = -1.0;
     double t1 = -1.0;
+    double t = -1.0;
 
     VectorMath::point l = VectorMath::subtractVectors(ray.getOrigin(), center);
 
@@ -118,29 +212,163 @@ double intersectSphere(Ray &ray, VectorMath::point center, double radius)
     // Check if valid intersection points
     if(VectorMath::quadratic(a, b, c, t0, t1))
     {
-        // Ensure Ascending Order
-        if(t0 > t1)
+        // Check if at least one intersection
+        if(t0 >= epsilon || t1 >= epsilon)
         {
-            // Update Intersection Values
-            std::swap(t0,t1);
-        }
-
-        // Check if t0 is negative
-        if (t0 < 0)
-        {
-            // Use t1 instead
-            t0 = t1;
-
-            // Check if t1 is negative
-            if (t0 < 0)
+            if(t0 >= 0.0 && t1 >= 0.0)
             {
-                // Set t0 to be negative
-                t0 = -1.0;
+                t = fmin(t0, t1);
             }
-       }
+            else if(t0 >= 0.0 && t1 <= 0.0)
+            {
+                t = t0;
+            }
+            else if(t1 >= 0.0 && t0 <= 0.0)
+            {
+                t = t1;
+            }
+        }
+        else
+        {
+            // Set to invalid value
+            t = -1.0;
+        }
     }
 
-    return t0;
+    return t;
+}
+
+/**
+ * intersectTriangle
+ */
+double intersectTriangle(Triangle triangle, Ray &ray)
+{
+    // Initialize Intersection Value
+    double t = -1.0;
+
+    // Get Origin Vector
+    VectorMath::point origin = ray.getOrigin();
+
+    // Get Direction Vector
+    VectorMath::point direction = ray.getDirection();
+
+    // Get Triangle Vertices
+    Vertex a = triangle.v[0];
+    Vertex b = triangle.v[1];
+    Vertex c = triangle.v[2];
+
+    // Calculate Edge BA
+    VectorMath::point ba = {b.position[0] - a.position[0],
+                            b.position[1] - a.position[1],
+                            b.position[2] - a.position[2]};
+
+    // Calculate Edge CA
+    VectorMath::point ca = {c.position[0] - a.position[0],
+                            c.position[1] - a.position[1],
+                            c.position[2] - a.position[2]};
+
+    // Calculated Normalized Vector for Ray-Plane Intersection
+    VectorMath::point n = VectorMath::normalize(VectorMath::crossProduct(ba, ca));
+
+    // Step 2: Check if Ray Parallel to Plane
+    double nDotD = VectorMath::dotProduct(n, direction);
+
+    // Check if [n dot d] is close to 0
+    if(abs(nDotD) < epsilon)
+    {
+        // Ray is Parallel to Plane
+        t = -1.0;
+    }
+    else
+    {
+        // Step 3: Calculate d Vector
+        VectorMath::point v0 = {a.position[0], a.position[1], a.position[2]};
+        double d = VectorMath::dotProduct(n, v0);
+
+        // Step 4: Calculate Intersection Point t [t = -(n dot p0 + d) / (n dot d)]
+        t = ((VectorMath::dotProduct(n, origin) + d)) / nDotD;
+
+        // Step 5: Check if Intersection is behind Ray Origin
+        if(t <= 0)
+        {
+            // Set to invalid value
+            t = -1.0;
+        }
+        else
+        {
+            // Compute the Intersection Point [P = origin + (t * Direction)]
+            VectorMath::point p = VectorMath::addVectors(origin, VectorMath::scalarMultiply(t, direction));
+
+            // Check if point not in triangle
+            if(!pointInTriangle(triangle, p, n))
+            {
+                // Set to invalid value
+                t = -1.0;
+            }
+        }
+    }
+
+    return t;
+}
+
+/**
+ * computeDiffuse
+ */
+double computeDiffuse(double kD, VectorMath::point lVec, VectorMath::point nVec)
+{
+    // Calculate [l dot n]
+    double lDotN = VectorMath::dotProduct(lVec, nVec);
+
+    // If L dot N is Less than or close to 0
+    if(lDotN < epsilon)
+    {
+        // Clamp to 0
+        lDotN = 0.0;
+    }
+
+    // Calculate the Diffuse Component
+    double diffuse =  kD * lDotN;
+
+    return diffuse;
+}
+
+/**
+ * computeSpecular
+ */
+double computeSpecular(double kS, double alpha, VectorMath::point rVec, VectorMath::point vVec)
+{
+    // Calculate [r dot v]
+    double rDotV = VectorMath::dotProduct(rVec, vVec);
+
+    if(rDotV < epsilon)
+    {
+        rDotV = 0;
+    }
+
+    // Calculate the Specular Component
+    double specular = kS * pow(rDotV, alpha);
+
+    return specular;
+}
+
+/**
+ * computeRVec
+ */
+VectorMath::point computeRVec(VectorMath::point lVec, VectorMath::point nVec)
+{
+    // Calculate [l dot N]
+    double lDotN = VectorMath::dotProduct(lVec, nVec);
+
+    // Calculate [2(l dot N)]
+    lDotN *= 2.0;
+
+    // Calculate [2(l dot N)N]
+    VectorMath::point tempVec = VectorMath::scalarMultiply(lDotN, nVec);
+
+    // Calculate R Vector [2(l dot N)N - l]
+    VectorMath::point rVec = VectorMath::subtractVectors(tempVec, lVec);
+
+    return rVec;
 }
 
 /**
@@ -150,10 +378,8 @@ double intersectSphere(Ray &ray, VectorMath::point center, double radius)
  * param s          - The Sphere
  * param interPoint - The Intersection Point of the Viewing Vector with the Sphere
  */
-Color computeSphereIllumination(Sphere s, double interPoint)
+Color computeSphereIllumination(Sphere s, VectorMath::point interPoint)
 {
-    Color c = {0.0, 255.0, 0.0};
-
     // Get the Diffuse for each Color Channel
     double kDRed = s.color_diffuse[0];
     double kDGreen = s.color_diffuse[1];
@@ -164,24 +390,196 @@ Color computeSphereIllumination(Sphere s, double interPoint)
     double kSGreen = s.color_specular[1];
     double kSBlue = s.color_specular[2];
 
+    // Get the Shininess Coefficient
+    double alpha = s.shininess;
+
     // Calculate V Vector (Vector from Intersection Point to Camera)
-    //VectorMath::point vVector = VectorMath::subtractVectors(v1, v2);
+    VectorMath::point vVec = VectorMath::subtractVectors(_cameraOrigin, interPoint);
+    vVec = VectorMath::normalize(vVec);
+
+    // Calculate N Vector (Unit Normal)
+    VectorMath::point center = {s.position[0], s.position[1], s.position[2]};
+    VectorMath::point sphereVector = VectorMath::subtractVectors(interPoint, center);
+    double length = VectorMath::magnitude(sphereVector);
+
+    // Calculate N Vector
+    VectorMath::point nVec = VectorMath::scalarDivision(s.radius, VectorMath::subtractVectors(interPoint, center));
+
+    // Initialize Light Intensity
+    double iRed = 0.0;
+    double iGreen = 0.0;
+    double iBlue = 0.0;
 
     // Iterate over the Lights in the Scene
     for(int i = 0; i < _numLights; ++i)
     {
-        // Calculate L Vector (Vector from Intersection Point to Light
-        // TODO
+        // Get Light Position
+        VectorMath::point light = {_lights[i].position[0],
+                _lights[i].position[1],
+                _lights[i].position[2]};
+
+        // Calculate L Vector (Vector from Intersection Point to Light)
+        VectorMath::point lVec = VectorMath::normalize(VectorMath::subtractVectors(light, interPoint));
+
+        // Calculate R Vector
+        VectorMath::point rVec = computeRVec(lVec, nVec);
 
         // Calculate the Red Intensity
-        // TODO
+        double diffuseRed = computeDiffuse(kDRed, lVec, nVec);
+        double specularRed = computeSpecular(kSRed, alpha, rVec, vVec);
+        iRed += _lights[i].color[0] * (diffuseRed + specularRed);
 
         // Calculate the Green Intensity
-        // TODO
+        double diffuseGreen = computeDiffuse(kDGreen, lVec, nVec);
+        double specularGreen = computeSpecular(kSGreen, alpha, rVec, vVec);
+        iGreen += _lights[i].color[1] * (diffuseGreen + specularGreen);
 
         // Calculate the Blue Intensity
-        // TODO
+        double diffuseBlue = computeDiffuse(kDBlue, lVec, nVec);
+        double specularBlue = computeSpecular(kSBlue, alpha, rVec, vVec);
+        iBlue += _lights[i].color[2] * (diffuseBlue + specularBlue);
     }
+
+    // Avg Intensity per Light
+    iRed /= _numLights;
+    iGreen /= _numLights;
+    iBlue /= _numLights;
+
+    // Add Ambient Light
+    iRed += _ambientLight[0];
+    iGreen += _ambientLight[1];
+    iBlue += _ambientLight[2];
+
+    // Bound the Red Intensity
+    if(iRed >= 1.0)
+    {
+        iRed = 1.0;
+    }
+
+    // Bound the Green Intensity
+    if(iGreen >= 1.0)
+    {
+        iGreen = 1.0;
+    }
+
+    // Bound the Blue Intensity
+    if(iBlue >= 1.0)
+    {
+        iBlue = 1.0;
+    }
+
+    // Convert to Char Values
+    double r = iRed * 255.0;
+    double g = iGreen * 255.0;
+    double b = iBlue * 255.0;
+
+    // Set Color
+    Color c = {(char)r, (char)g, (char)b};
+
+    return c;
+}
+
+/**
+ * computeTriangleIllumination - Calculates the Colors to display at the Triangle
+ *                                based on the Phong Illumination Model
+ *
+ * param t          - The Triangle
+ * param interPoint - The Intersection Point of the Viewing Vector with the Triangle
+ */
+Color computeTriangleIllumination(Triangle t, VectorMath::point interPoint)
+{
+    // Initialize Light Intensity
+    double iRed, iGreen, iBlue;
+
+    // Calculate V Vector (Vector from Intersection Point to Camera)
+    VectorMath::point vVec = VectorMath::subtractVectors(_cameraOrigin, interPoint);
+    vVec = VectorMath::normalize(vVec);
+
+    // Calculate N Vector
+    VectorMath::point nVec;
+    nVec.x = (_alpha * t.v[0].normal[0]) + (_beta * t.v[1].normal[0]) + (_gamma * t.v[2].normal[0]);
+    nVec.y = (_alpha * t.v[0].normal[1]) + (_beta * t.v[1].normal[1]) + (_gamma * t.v[2].normal[1]);
+    nVec.z = (_alpha * t.v[0].normal[2]) + (_beta * t.v[1].normal[2]) + (_gamma * t.v[2].normal[2]);
+    nVec = VectorMath::normalize(nVec);
+
+    // Calculate Diffuse
+    double kDRed =   (_alpha * t.v[0].color_diffuse[0]) + (_beta * t.v[1].color_diffuse[0]) + (_gamma * t.v[2].color_diffuse[0]);
+    double kDGreen = (_alpha * t.v[0].color_diffuse[1]) + (_beta * t.v[1].color_diffuse[1]) + (_gamma * t.v[2].color_diffuse[1]);
+    double kDBlue =  (_alpha * t.v[0].color_diffuse[2]) + (_beta * t.v[1].color_diffuse[2]) + (_gamma * t.v[2].color_diffuse[2]);
+
+    // Calculate Specular
+    double kSRed =   (_alpha * t.v[0].color_specular[0]) + (_beta * t.v[1].color_specular[0]) + (_gamma * t.v[2].color_specular[0]);
+    double kSGreen = (_alpha * t.v[0].color_specular[1]) + (_beta * t.v[1].color_specular[1]) + (_gamma * t.v[2].color_specular[1]);
+    double kSBlue =  (_alpha * t.v[0].color_specular[2]) + (_beta * t.v[1].color_specular[2]) + (_gamma * t.v[2].color_specular[2]);
+
+    // Calculate Shininess Value
+    double shininess = (_alpha * t.v[0].shininess) + (_beta * t.v[1].shininess) + (_gamma * t.v[2].shininess);
+
+    // Iterate over the Lights in the Scene
+    for(int i = 0; i < _numLights; ++i)
+    {
+        // Get Light Position
+        VectorMath::point light = {_lights[i].position[0],
+                                   _lights[i].position[1],
+                                   _lights[i].position[2]};
+
+        // Calculate L Vector (Vector from Intersection Point to Light)
+        VectorMath::point lVec = VectorMath::normalize(VectorMath::subtractVectors(light, interPoint));
+
+        // Calculate R Vector
+        VectorMath::point rVec = computeRVec(lVec, nVec);
+
+        // Calculate the Red Intensity
+        double diffuseRed = computeDiffuse(kDRed, lVec, nVec);
+        double specularRed = computeSpecular(kSRed, shininess, rVec, vVec);
+        iRed += _lights[i].color[0] * (diffuseRed + specularRed);
+
+        // Calculate the Green Intensity
+        double diffuseGreen = computeDiffuse(kDGreen, lVec, nVec);
+        double specularGreen = computeSpecular(kSGreen, shininess, rVec, vVec);
+        iGreen += _lights[i].color[1] * (diffuseGreen + specularGreen);
+
+        // Calculate the Blue Intensity
+        double diffuseBlue = computeDiffuse(kDBlue, lVec, nVec);
+        double specularBlue = computeSpecular(kSBlue, shininess, rVec, vVec);
+        iBlue += _lights[i].color[2] * (diffuseBlue + specularBlue);
+    }
+
+    // Avg Intensity per Light
+    iRed /= _numLights;
+    iGreen /= _numLights;
+    iBlue /= _numLights;
+
+    // Add Ambient Light
+    iRed += _ambientLight[0];
+    iGreen += _ambientLight[1];
+    iBlue += _ambientLight[2];
+
+    // Bound the Red Intensity
+    if(iRed > 1.0)
+    {
+        iRed = 1.0;
+    }
+
+    // Bound the Green Intensity
+    if(iGreen > 1.0)
+    {
+        iGreen = 1.0;
+    }
+
+    // Bound the Blue Intensity
+    if(iBlue > 1.0)
+    {
+        iBlue = 1.0;
+    }
+
+    // Convert to Char Values
+    double r = iRed * 255.0;
+    double g = iGreen * 255.0;
+    double b = iBlue * 255.0;
+
+    // Set Color
+    Color c = {(char)r, (char)g, (char)b};
 
     return c;
 }
@@ -194,17 +592,12 @@ void drawBackground()
     // Iterate over Width of Image
     for(int x = 0; x < WIDTH; x++)
     {
-        glPointSize(2.0);
-        glBegin(GL_POINTS);
-
         // Iterate over Height of Image
         for(int y = 0; y < HEIGHT; y++)
         {
             // Draw Pixel
             plotPixel(x, y, 255.0, 255.0, 255.0);
         }
-        glEnd();
-        glFlush();
     }
 }
 
@@ -213,15 +606,21 @@ void drawBackground()
  */
 void drawScene()
 {
+    glPointSize(2.0);
+    glBegin(GL_POINTS);
+
     // Draw Background
     drawBackground();
 
     // Initialize Aspect
     float aspect = WIDTH/HEIGHT;
 
+    // Initialize Degree to Radian Coversion
+    float degToRad = M_PI/180.0;
+
     // Initial Ray Direction Position
-    float initX = -aspect * tan((fov/2) * DEG_TO_RAD);
-    float initY = tan((fov/2) * DEG_TO_RAD);
+    float initX = -aspect * tan((fov/2) * degToRad);
+    float initY = tan((fov/2) * degToRad);
     float initZ = -1;
 
     // Iterate over Height of Image
@@ -231,8 +630,8 @@ void drawScene()
         for(int x = 0; x < WIDTH; x++)
         {
             // Calculate Delta X/Y
-            float xLength = -initX - initX;
-            float yLength = -initY - initY;
+            float xLength = (-initX) - initX;
+            float yLength = (-initY) - initY;
             float dx = (x * xLength) / WIDTH;
             float dy = (y * yLength) / HEIGHT;
 
@@ -245,41 +644,82 @@ void drawScene()
             // Create new Ray
             Ray *ray = new Ray(_cameraOrigin, direction);
 
-            // Iterate over all the Spheres
-            for(int i = 0; i < _numSpheres; ++i)
-            {
-                // Get the Sphere
-                Sphere s = spheres[i];
+            // Initialize Closest Point
+            double closestPoint = 1000000;
 
-                // Get Center Point of Sphere
-                VectorMath::point center = {s.position[0], s.position[1], s.position[2]};
-
-                // Get the Intersection Point
-                double interPoint = intersectSphere(*ray, center, s.radius);
-
-                // Check if Ray Intersects Sphere
-                if(interPoint > 0)
-                {
-                    // Calculate Phong Illumination for the Sphere
-                    Color c = computeSphereIllumination(s, interPoint);
-
-                    // Draw Pixel
-                    plotPixel(x, y, c.red, c.green, c.blue);
-                }
-            }
+            // Initialize Color
+            Color c = {0.0, 0.0, 0.0};
 
             // Iterate over all the Triangles
             for(int j = 0; j < _numTriangles; ++j)
             {
                 // Get the Triangle
-                Triangle t = triangles[j];
+                Triangle triangle = _triangles[j];
+
+                // Check if there is an intersection with the Triangle
+                double tTriangle = intersectTriangle(triangle, *ray);
+
+                // Check if Ray Intersects Triangle
+                if(tTriangle > 0)
+                {
+                    // Calculate Intersection Point [p = v0 + (vd*t)]
+                    VectorMath::point triangleInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tTriangle, ray->getDirection()));
+
+                    // Check if Closest Point to Camera (Z Value)
+                    if(triangleInterPoint.z < closestPoint)
+                    {
+                        // Update Closest Point
+                        closestPoint = triangleInterPoint.z;
+
+                        // Calculate Phong Illumination for the Sphere
+                        c = computeTriangleIllumination(triangle, triangleInterPoint);
+
+                        // Draw Pixel
+                        plotPixel(x, HEIGHT - y, c.red, c.green, c.blue);
+                    }
+                }
+            }
+
+            // Iterate over all the Spheres
+            for(int i = 0; i < _numSpheres; ++i)
+            {
+                // Get the Sphere
+                Sphere s = _spheres[i];
+
+                // Get Center Point of Sphere
+                VectorMath::point center = {s.position[0], s.position[1], s.position[2]};
+
+                // Check if there is an intersection with the Sphere
+                double tSphere = intersectSphere(*ray, center, s.radius);
+
+                // Check if Ray Intersects Sphere
+                if(tSphere > 0)
+                {
+                    // Calculate Intersection Point [p = v0 + (vd*t)]
+                    VectorMath::point sphereInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tSphere, ray->getDirection()));
+
+                    // Check if Closest Point to Camera (Z Value)
+                    //if(sphereInterPoint.z < closestPoint)
+                    //{
+                        // Update Closest Point
+                        //closestPoint = sphereInterPoint.z;
+
+                        // Calculate Phong Illumination for the Sphere
+                        Color c = computeSphereIllumination(s, sphereInterPoint);
+
+                        // Draw Pixel
+                        plotPixel(x, HEIGHT-y, c.red, c.green, c.blue);
+                    //}
+                }
             }
         }
     }
 
+    glEnd();
+    glFlush();
+
     // Log Debug
-    printf("Done!\n");
-    fflush(stdout);
+    std::cout << "Trace Completed \n" << std::endl;
 }
 
 /**
@@ -402,7 +842,7 @@ int loadScene(char *argv)
     printf("number of objects: %i\n",numObjects);
     char str[200];
 
-    parseDoubles(file,"amb:",ambient_light);
+    parseDoubles(file,"amb:",_ambientLight);
 
     // Iterate over the Objects
     for(i=0; i<numObjects; i++)
@@ -432,7 +872,7 @@ int loadScene(char *argv)
                 printf("too many triangles, you should increase MAX_TRIANGLES!\n");
                 exit(0);
             }
-            triangles[_numTriangles++] = t;
+            _triangles[_numTriangles++] = t;
         }
         else if(strcasecmp(type,"sphere")==0)
         {
@@ -453,7 +893,7 @@ int loadScene(char *argv)
             }
 
             // Store Sphere
-            spheres[_numSpheres++] = s;
+            _spheres[_numSpheres++] = s;
         }
         else if(strcasecmp(type,"light")==0)
         {
@@ -468,7 +908,7 @@ int loadScene(char *argv)
             }
 
             // Store Light
-            lights[_numLights++] = l;
+            _lights[_numLights++] = l;
         }
         else
         {
@@ -485,26 +925,13 @@ int loadScene(char *argv)
 void display()
 {
     // N/A
-
 }
-
-/**
- * intersectTriangle
- */
-bool intersectTriangle(Ray &ray)
-{
-
-}
-
 
 /**
  * idle
  */
 void idle()
 {
-    //hack to make it only draw once
-    static int once = 0;
-
     // Ensure drawn only once
     if(!once)
     {
@@ -517,11 +944,8 @@ void idle()
             // Save the Image
             saveJpeg();
         }
-
-        glFinish();
     }
 
-    // Update Draw Once Indicator
     once=1;
 }
 
@@ -534,7 +958,8 @@ void init()
     glOrtho(0,WIDTH,0,HEIGHT,1,-1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glClearColor(0.0, 0.0, 0.0, 0.0); // set background color
+
+    glClearColor(0,0,0,0);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -572,7 +997,7 @@ int main (int argc, char ** argv)
     loadScene(argv[1]);
 
     // Request Single Buffer, and Color
-    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGBA);
+    glutInitDisplayMode(GLUT_RGBA | GLUT_SINGLE);
 
     // Set window size/position
     glutInitWindowSize(WIDTH,HEIGHT);
