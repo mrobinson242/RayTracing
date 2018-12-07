@@ -134,29 +134,29 @@ bool pointInTriangle(Triangle triangle, VectorMath::point p, VectorMath::point n
 
     // Calculate Edges of Triangle
     VectorMath::point edgeCB = {c.position[0] - b.position[0],
-                                c.position[1] - b.position[1],
-                                c.position[2] - b.position[2]};
+            c.position[1] - b.position[1],
+            c.position[2] - b.position[2]};
 
     VectorMath::point edgeBA = {b.position[0] - a.position[0],
-                                b.position[1] - a.position[1],
-                                b.position[2] - a.position[2]};
+            b.position[1] - a.position[1],
+            b.position[2] - a.position[2]};
 
     VectorMath::point edgeAC = {a.position[0] - c.position[0],
-                                a.position[1] - c.position[1],
-                                a.position[2] - c.position[2]};
+            a.position[1] - c.position[1],
+            a.position[2] - c.position[2]};
 
     // Calculate Vector between Intersection Point and each Vertex
     VectorMath::point vInterA = {p.x - a.position[0],
-                                 p.y - a.position[1],
-                                 p.z - a.position[2]};
+            p.y - a.position[1],
+            p.z - a.position[2]};
 
     VectorMath::point vInterB = {p.x - b.position[0],
-                                 p.y - b.position[1],
-                                 p.z - b.position[2]};
+            p.y - b.position[1],
+            p.z - b.position[2]};
 
     VectorMath::point vInterC = {p.x - c.position[0],
-                                 p.y - c.position[1],
-                                 p.z - c.position[2]};
+            p.y - c.position[1],
+            p.z - c.position[2]};
 
     // Calculate Cross Product between each Edge and the Intersection/Vertex Vector
     VectorMath::point crossA = VectorMath::crossProduct(edgeBA, vInterA);
@@ -165,8 +165,8 @@ bool pointInTriangle(Triangle triangle, VectorMath::point p, VectorMath::point n
 
     // Check if point is inside Triangle
     if( (VectorMath::dotProduct(n, crossA) < 0) ||
-        (VectorMath::dotProduct(n, crossB) < 0) ||
-        (VectorMath::dotProduct(n, crossC) < 0))
+            (VectorMath::dotProduct(n, crossB) < 0) ||
+            (VectorMath::dotProduct(n, crossC) < 0))
     {
         // No Intersection
         isInTriangle = false;
@@ -259,13 +259,13 @@ double intersectTriangle(Triangle triangle, Ray &ray)
 
     // Calculate Edge BA
     VectorMath::point ba = {b.position[0] - a.position[0],
-                            b.position[1] - a.position[1],
-                            b.position[2] - a.position[2]};
+            b.position[1] - a.position[1],
+            b.position[2] - a.position[2]};
 
     // Calculate Edge CA
     VectorMath::point ca = {c.position[0] - a.position[0],
-                            c.position[1] - a.position[1],
-                            c.position[2] - a.position[2]};
+            c.position[1] - a.position[1],
+            c.position[2] - a.position[2]};
 
     // Calculated Normalized Vector for Ray-Plane Intersection
     VectorMath::point n = VectorMath::normalize(VectorMath::crossProduct(ba, ca));
@@ -520,8 +520,8 @@ Color computeTriangleIllumination(Triangle t, VectorMath::point interPoint)
     {
         // Get Light Position
         VectorMath::point light = {_lights[i].position[0],
-                                   _lights[i].position[1],
-                                   _lights[i].position[2]};
+                _lights[i].position[1],
+                _lights[i].position[2]};
 
         // Calculate L Vector (Vector from Intersection Point to Light)
         VectorMath::point lVec = VectorMath::normalize(VectorMath::subtractVectors(light, interPoint));
@@ -650,68 +650,14 @@ void drawScene()
             // Initialize Color
             Color c = {0.0, 0.0, 0.0};
 
-            // Iterate over all the Triangles
-            for(int j = 0; j < _numTriangles; ++j)
-            {
-                // Get the Triangle
-                Triangle triangle = _triangles[j];
+            // Perform Triangle Intersection Calculations
+            c = calculateTriangleCollision();
 
-                // Check if there is an intersection with the Triangle
-                double tTriangle = intersectTriangle(triangle, *ray);
+            // Perform Sphere Intersection Calculations
+            c = calculateSphereCollision();
 
-                // Check if Ray Intersects Triangle
-                if(tTriangle > 0)
-                {
-                    // Calculate Intersection Point [p = v0 + (vd*t)]
-                    VectorMath::point triangleInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tTriangle, ray->getDirection()));
-
-                    // Check if Closest Point to Camera (Z Value)
-                    if(triangleInterPoint.z < closestPoint)
-                    {
-                        // Update Closest Point
-                        closestPoint = triangleInterPoint.z;
-
-                        // Calculate Phong Illumination for the Sphere
-                        c = computeTriangleIllumination(triangle, triangleInterPoint);
-
-                        // Draw Pixel
-                        plotPixel(x, HEIGHT - y, c.red, c.green, c.blue);
-                    }
-                }
-            }
-
-            // Iterate over all the Spheres
-            for(int i = 0; i < _numSpheres; ++i)
-            {
-                // Get the Sphere
-                Sphere s = _spheres[i];
-
-                // Get Center Point of Sphere
-                VectorMath::point center = {s.position[0], s.position[1], s.position[2]};
-
-                // Check if there is an intersection with the Sphere
-                double tSphere = intersectSphere(*ray, center, s.radius);
-
-                // Check if Ray Intersects Sphere
-                if(tSphere > 0)
-                {
-                    // Calculate Intersection Point [p = v0 + (vd*t)]
-                    VectorMath::point sphereInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tSphere, ray->getDirection()));
-
-                    // Check if Closest Point to Camera (Z Value)
-                    //if(sphereInterPoint.z < closestPoint)
-                    //{
-                        // Update Closest Point
-                        //closestPoint = sphereInterPoint.z;
-
-                        // Calculate Phong Illumination for the Sphere
-                        Color c = computeSphereIllumination(s, sphereInterPoint);
-
-                        // Draw Pixel
-                        plotPixel(x, HEIGHT-y, c.red, c.green, c.blue);
-                    //}
-                }
-            }
+            // Draw Pixel
+            plotPixel(x, HEIGHT - y, c.red, c.green, c.blue);
         }
     }
 
@@ -720,6 +666,132 @@ void drawScene()
 
     // Log Debug
     std::cout << "Trace Completed \n" << std::endl;
+}
+
+Color calculateTriangleCollision()
+{
+    // Iterate over all the Triangles
+    for(int j = 0; j < _numTriangles; ++j)
+    {
+        // Get the Triangle
+        Triangle triangle = _triangles[j];
+
+        // Check if there is an intersection with the Triangle
+        double tTriangle = intersectTriangle(triangle, *ray);
+
+        // Check if Ray Intersects Triangle
+        if(tTriangle > 0)
+        {
+            // Calculate Intersection Point [p = v0 + (vd*t)]
+            VectorMath::point triangleInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tTriangle, ray->getDirection()));
+
+            // Check if Closest Point to Camera (Z Value)
+            if(triangleInterPoint.z < closestPoint)
+            {
+                // Update Closest Point
+                closestPoint = triangleInterPoint.z;
+
+                // Calculate Phong Illumination for the Sphere
+                c = computeTriangleIllumination(triangle, triangleInterPoint);
+
+                // Draw Pixel
+                plotPixel(x, HEIGHT - y, c.red, c.green, c.blue);
+            }
+        }
+    }
+}
+
+/**
+ * calculateSphereCollision
+ */
+Color calculateSphereCollision()
+{
+    // Initialize Color
+    Color c = {0.0, 0.0, 0.0};
+
+    // Iterate over all the Spheres
+    for(int i = 0; i < _numSpheres; ++i)
+    {
+        // Get the Sphere
+        Sphere s = _spheres[i];
+
+        // Get Center Point of Sphere
+        VectorMath::point center = {s.position[0], s.position[1], s.position[2]};
+
+        // Check if there is an intersection with the Sphere
+        double tSphere = intersectSphere(*ray, center, s.radius);
+
+        // Check if Ray Intersects Sphere
+        if(tSphere > 0)
+        {
+            // Calculate Intersection Point [p = v0 + (vd*t)]
+            VectorMath::point sphereInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tSphere, ray->getDirection()));
+
+            // Iterate over the Lights in the Scene
+            for(int i = 0; i < _numLights; ++i)
+            {
+                // Get Light Position
+                VectorMath::point light = {_lights[i].position[0],
+                        _lights[i].position[1],
+                        _lights[i].position[2]};
+
+                // Calculate the Shadow Ray
+                VectorMath::point shadowDirection = VectorMath::subtractVectors(light, sphereInterPoint);
+                Ray* shadowRay = new Ray(sphereInterPoint, VectorMath::normalize(shadowDirection));
+
+                // Initialize is Illuminated Variable
+                bool isIlluminated = true;
+
+                // Iterate over all the Spheres
+                for(int j = 0; j < _numSpheres; ++j)
+                {
+                    // Get the Sphere
+                    Sphere s2 = _spheres[j];
+
+                    // Ignore own object
+                    if(i != j)
+                    {
+                        // Get Center Point of Sphere
+                        VectorMath::point center2 = {s2.position[0], s2.position[1], s2.position[2]};
+
+                        // Check if there is an intersection with the Sphere
+                        double tShadowSphere = intersectSphere(*shadowRay, center2, s2.radius);
+
+                        // Check if Intersection
+                        if(tShadowSphere > 0)
+                        {
+                            // Calculate Intersection Point [p = v0 + (vd*t)]
+                            VectorMath::point shadowInterPoint = VectorMath::addVectors(ray->getOrigin(), VectorMath::scalarMultiply(tSphere, ray->getDirection()));
+
+                            // Ensure Shadow Intersection Point is not past the light
+                            VectorMath::point x = VectorMath::subtractVectors(shadowInterPoint, sphereInterPoint);
+                            VectorMath::point y = VectorMath::subtractVectors(light, sphereInterPoint);
+
+                            if(VectorMath::magnitude(x) < VectorMath::magnitude(y))
+                            {
+                                isIlluminated = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check if Illuminated
+                if(isIlluminated)
+                {
+                    // Calculate Phong Illumination for the Sphere
+                     Color cTemp = computeSphereIllumination(s, sphereInterPoint);
+
+                     c += cTemp;
+
+                     // Draw Pixel
+                     plotPixel(x, HEIGHT-y, c.red, c.green, c.blue);
+                }
+            }
+        }
+    }
+
+    return c;
 }
 
 /**
