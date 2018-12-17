@@ -1,10 +1,3 @@
-/*
- * VectorMath.h
- *
- *  Created on: Nov 24, 2018
- *      Author: Matt
- */
-
 #ifndef _VECTOR_MATH_H_
 #define _VECTOR_MATH_H_
 
@@ -13,8 +6,6 @@
 
 class VectorMath
 {
-
-
 public:
     /**
      * point - represents a point in OpenGL Space
@@ -101,6 +92,9 @@ public:
      *             on the provided values
      */
     static bool quadratic(double a, double b, double c, double &root1, double &root2);
+
+private:
+
 };
 
 #endif /* _VECTOR_MATH_H_ */

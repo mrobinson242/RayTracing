@@ -1,21 +1,23 @@
 # Makefile 
-# CSCI 480
+# CSCI 420
 # Assignment 3
 
 # we assume the pic directory locates one level above,
 # change PIC_PATH if this is not the case
 PIC_PATH = $(abspath $(CURDIR)/../pic)
+HEADER_PATH = $(abspath $(CURDIR)/headers)
 
 INCLUDE = -I$(PIC_PATH)
+HEADER = -I$(HEADER_PATH)
 LIBRARIES = -L$(PIC_PATH) -framework OpenGL -framework GLUT -lpicio $(PIC_PATH)/libjpeg.a
 
 
 COMPILER = g++
 COMPILERFLAGS = -O3 $(INCLUDE)
 
-PROGRAM = assign3
-SOURCE = assign3.cpp
-OBJECT = assign3.o VectorMath.o Ray.o
+PROGRAM = RayTracer
+SOURCE = RayTracer.cpp
+OBJECT = RayTracer.o VectorMath.o
 
 .cpp.o: 
 	$(COMPILER) -c $(COMPILERFLAGS) $<

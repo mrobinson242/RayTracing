@@ -1,10 +1,3 @@
-/*
- * VectorMath.cpp
- *
- *  Created on: Nov 24, 2018
- *      Author: Matt
- */
-
 #include "VectorMath.h"
 
 /**
@@ -12,7 +5,7 @@
  */
 VectorMath::VectorMath()
 {
-    //N/A
+    // N/As
 }
 
 /**
@@ -115,9 +108,19 @@ VectorMath::point VectorMath::normalize(VectorMath::point v)
     // Calculate Length (Magnitude) of the Vector
     double length = magnitude(v);
 
-    unitVector.x = v.x/length;
-    unitVector.y = v.y/length;
-    unitVector.z = v.z/length;
+    // Check Divide by zero case
+    if(length > 0)
+    {
+        unitVector.x = v.x/length;
+        unitVector.y = v.y/length;
+        unitVector.z = v.z/length;
+    }
+    else
+    {
+        unitVector.x = v.x;
+        unitVector.y = v.y;
+        unitVector.z = v.z;
+    }
 
     return unitVector;
 }
